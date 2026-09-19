@@ -1,0 +1,117 @@
+//@version=5
+indicator("Murrey Math Lines (MML) - MTF", overlay=true, max_lines_count=500, max_labels_count=500)
+
+// ============ INPUT ============
+g1 = "Frame Settings"
+length      = input.int(64, "Lookback Period (Frame)", minval=8, group=g1)
+useWicks    = input.bool(true, "Hitung Frame dari Wick (High/Low)", tooltip="Jika nonaktif, memakai Close saja", group=g1)
+tf          = input.timeframe("", "Timeframe MTF (kosongkan = chart aktif)", group=g1)
+
+g2 = "Tampilan"
+showExtreme = input.bool(true, "Tampilkan Level Ekstrem (-1/8 & 9/8)", group=g2)
+showOnlyExtreme = input.bool(false, "Hanya Tampilkan Level Ekstrem", group=g2)
+showLabels  = input.bool(true, "Tampilkan Label Harga", group=g2)
+extendRight = input.bool(true, "Perpanjang Garis ke Kanan", group=g2)
+lineWidth   = input.int(1, "Ketebalan Garis Utama (0/8, 4/8, 8/8)", minval=1, maxval=4, group=g2)
+
+g3 = "Warna"
+colMain     = input.color(color.new(color.orange, 0), "Warna 0/8 & 8/8", group=g3)
+colMid      = input.color(color.new(color.blue, 0), "Warna 4/8 (Midline)", group=g3)
+colMinor    = input.color(color.new(color.gray, 40), "Warna Level Minor", group=g3)
+colExtreme  = input.color(color.new(color.red, 0), "Warna Level Ekstrem", group=g3)
+
+// ============ SOURCE ============
+srcHigh = useWicks ? high : close
+srcLow  = useWicks ? low  : close
+
+getHL(_len) =>
+    h = ta.highest(srcHigh, _len)
+    l = ta.lowest(srcLow, _len)
+    [h, l]
+
+[hh, ll] = tf == "" ? getHL(length) : request.security(syminfo.tickerid, tf, getHL(length), lookahead=barmerge.lookahead_off)
+
+// ============ MURREY MATH FRACTAL SCALING ============
+// Menyesuaikan range agar jatuh pada kelipatan "oktaf" 8^n, ciri khas Murrey Math
+fractalize(_range) =>
+    v1 = math.log(_range) / math.log(8)
+    r1 = v1 == math.round(v1) ? math.round(v1) - 1 : math.floor(v1)
+    n1 = math.pow(8, r1)
+    n2 = math.round(_range / n1)
+    n2 := n2 > 8 ? 8.0 : n2 < 1 ? 1.0 : n2
+    n1 * n2
+
+range_ = hh - ll
+octave = range_ > 0 ? fractalize(range_) : ta.tr
+
+fracLL = math.floor(ll / octave) * octave
+fracHH = fracLL + octave
+if fracHH < hh
+    fracHH := fracHH + octave
+    fracLL := fracHH - octave
+
+step = (fracHH - fracLL) / 8
+
+// Level 0/8 .. 8/8, plus ekstrem -1/8 dan 9/8
+l0 = fracLL
+l1 = fracLL + step * 1
+l2 = fracLL + step * 2
+l3 = fracLL + step * 3
+l4 = fracLL + step * 4
+l5 = fracLL + step * 5
+l6 = fracLL + step * 6
+l7 = fracLL + step * 7
+l8 = fracHH
+lMinus1 = fracLL - step
+l9 = fracHH + step
+
+// ============ DRAWING ============
+var line ln0 = na
+var line ln1 = na
+var line ln2 = na
+var line ln3 = na
+var line ln4 = na
+var line ln5 = na
+var line ln6 = na
+var line ln7 = na
+var line ln8 = na
+var line lnM1 = na
+var line ln9 = na
+
+var label lb0 = na
+var label lb4 = na
+var label lb8 = na
+var label lbM1 = na
+var label lb9 = na
+
+extendMode = extendRight ? extend.right : extend.none
+
+drawLine(_ln, _y, _col, _w) =>
+    line.delete(_ln)
+    line.new(bar_index, _y, bar_index, _y, extend = extendMode, color = _col, width = _w)
+
+drawLabel(_lb, _y, _txt, _col) =>
+    label.delete(_lb)
+    showLabels ? label.new(bar_index, _y, _txt, style=label.style_label_left, color=color.new(_col, 80), textcolor=_col, size=size.small) : na
+
+if barstate.islast
+    if not showOnlyExtreme
+        ln0 := drawLine(ln0, l0, colMain, lineWidth)
+        ln1 := drawLine(ln1, l1, colMinor, 1)
+        ln2 := drawLine(ln2, l2, colMinor, 1)
+        ln3 := drawLine(ln3, l3, colMinor, 1)
+        ln4 := drawLine(ln4, l4, colMid, lineWidth)
+        ln5 := drawLine(ln5, l5, colMinor, 1)
+        ln6 := drawLine(ln6, l6, colMinor, 1)
+        ln7 := drawLine(ln7, l7, colMinor, 1)
+        ln8 := drawLine(ln8, l8, colMain, lineWidth)
+
+        lb0 := drawLabel(lb0, l0, "0/8  " + str.tostring(l0, format.mintick), colMain)
+        lb4 := drawLabel(lb4, l4, "4/8  " + str.tostring(l4, format.mintick), colMid)
+        lb8 := drawLabel(lb8, l8, "8/8  " + str.tostring(l8, format.mintick), colMain)
+
+    if showExtreme
+        lnM1 := drawLine(lnM1, lMinus1, colExtreme, lineWidth)
+        ln9  := drawLine(ln9, l9, colExtreme, lineWidth)
+        lbM1 := drawLabel(lbM1, lMinus1, "-1/8  " + str.tostring(lMinus1, format.mintick), colExtreme)
+        lb9  := drawLabel(lb9, l9, "9/8  " + str.tostring(l9, format.mintick), colExtreme)
