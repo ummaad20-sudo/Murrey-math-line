@@ -1,0 +1,71 @@
+//@version=5
+indicator("Murrey Math Lines (MML) - MTF", overlay=true, max_lines_count=500, max_labels_count=500)
+
+length          = input.int(64, "Lookback Period (Frame)", minval=8)
+useWicks        = input.bool(true, "Hitung Frame dari Wick (High/Low)")
+tf              = input.timeframe("", "Timeframe MTF (kosongkan = chart aktif)")
+showExtreme     = input.bool(true, "Tampilkan Level Ekstrem (-1/8 & 9/8)")
+showOnlyExtreme = input.bool(false, "Hanya Tampilkan Level Ekstrem")
+showLabels      = input.bool(true, "Tampilkan Label Harga")
+extendRight     = input.bool(true, "Perpanjang Garis ke Kanan")
+lineWidth       = input.int(1, "Ketebalan Garis Utama", minval=1, maxval=4)
+colMain         = input.color(color.new(color.orange, 0), "Warna 0/8 & 8/8")
+colMid          = input.color(color.new(color.blue, 0), "Warna 4/8 (Midline)")
+colMinor        = input.color(color.new(color.gray, 40), "Warna Level Minor")
+colExtreme      = input.color(color.new(color.red, 0), "Warna Level Ekstrem")
+
+srcHigh = useWicks ? high : close
+srcLow  = useWicks ? low  : close
+
+[hh, ll] = tf == "" ? [ta.highest(srcHigh, length), ta.lowest(srcLow, length)] : request.security(syminfo.tickerid, tf, [ta.highest(srcHigh, length), ta.lowest(srcLow, length)], lookahead=barmerge.lookahead_off)
+
+range_ = hh - ll
+v1     = math.log(range_) / math.log(8)
+r1     = v1 == math.round(v1) ? math.round(v1) - 1 : math.floor(v1)
+n1     = math.pow(8, r1)
+n2raw  = math.round(range_ / n1)
+n2     = n2raw > 8 ? 8.0 : n2raw < 1 ? 1.0 : n2raw
+octave = range_ > 0 ? n1 * n2 : ta.tr
+
+fracLLraw = math.floor(ll / octave) * octave
+fracHHraw = fracLLraw + octave
+needShift = fracHHraw < hh
+fracHH    = needShift ? fracHHraw + octave : fracHHraw
+fracLL    = needShift ? fracHH - octave : fracLLraw
+
+step = (fracHH - fracLL) / 8
+
+l0  = fracLL
+l1  = fracLL + step * 1
+l2  = fracLL + step * 2
+l3  = fracLL + step * 3
+l4  = fracLL + step * 4
+l5  = fracLL + step * 5
+l6  = fracLL + step * 6
+l7  = fracLL + step * 7
+l8  = fracHH
+lm1 = fracLL - step
+l9  = fracHH + step
+
+extendMode = extendRight ? extend.right : extend.none
+
+var line[] mmlLines = array.new_line(11)
+var label[] mmlLabels = array.new_label(11)
+vals  = array.from(l0, l1, l2, l3, l4, l5, l6, l7, l8, lm1, l9)
+names = array.from("0/8", "1/8", "2/8", "3/8", "4/8", "5/8", "6/8", "7/8", "8/8", "-1/8", "9/8")
+
+if barstate.islast
+    for i = 0 to 10
+        isMain    = i == 0 or i == 8
+        isMid     = i == 4
+        isExtreme = i == 9 or i == 10
+        skip      = (showOnlyExtreme and not isExtreme) or (isExtreme and not showExtreme)
+        col       = isExtreme ? colExtreme : isMain ? colMain : isMid ? colMid : colMinor
+        wid       = (isMain or isMid or isExtreme) ? lineWidth : 1
+        y         = array.get(vals, i)
+        line.delete(array.get(mmlLines, i))
+        label.delete(array.get(mmlLabels, i))
+        if not skip
+            array.set(mmlLines, i, line.new(bar_index, y, bar_index, y, extend=extendMode, color=col, width=wid))
+            if showLabels
+                array.set(mmlLabels, i, label.new(bar_index, y, array.get(names, i) + "  " + str.tostring(y, format.mintick), style=label.style_label_left, color=color.new(col, 80), textcolor=col, size=size.small))
