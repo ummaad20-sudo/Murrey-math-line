@@ -1,0 +1,100 @@
+//@version=5
+// Basic Hull Ma Pack tinkered by InSilico — digabung jadi 1 STRATEGY (backtest + MTF + Band + Alert)
+strategy("Hull Wave MTF Pro - Jun02", overlay=true, pyramiding=1, default_qty_type=strategy.percent_of_equity, default_qty_value=100, calc_on_order_fills=false, slippage=0, commission_type=strategy.commission.percent, commission_value=0)
+
+// ============ ARAH STRATEGY ============
+strat_dir_input = input.string(title="Strategy Direction", defval="long", options=["long", "short", "all"])
+strat_dir_value = strat_dir_input == "long" ? strategy.direction.long : strat_dir_input == "short" ? strategy.direction.short : strategy.direction.all
+strategy.risk.allow_entry_in(strat_dir_value)
+
+// ============ RENTANG BACKTEST ============
+testStartYear  = input.int(2016, "Backtest Start Year")
+testStartMonth = input.int(1, "Backtest Start Month")
+testStartDay   = input.int(1, "Backtest Start Day")
+testPeriodStart = timestamp(testStartYear, testStartMonth, testStartDay, 0, 0)
+
+testStopYear  = input.int(2030, "Backtest Stop Year")
+testStopMonth = input.int(12, "Backtest Stop Month")
+testStopDay   = input.int(30, "Backtest Stop Day")
+testPeriodStop = timestamp(testStopYear, testStopMonth, testStopDay, 0, 0)
+
+testPeriod() =>
+    time >= testPeriodStart and time <= testPeriodStop
+
+// ============ INPUT HULL ============
+src            = input.source(close, title="Source")
+modeSwitch     = input.string("Hma", title="Hull Variation", options=["Hma", "Thma", "Ehma"])
+length         = input.int(55, title="Length (180-200 utk floating S/R, 55 utk swing entry)")
+
+useHtf         = input.bool(false, title="Ambil Hull MA dari Timeframe Lain? (cocok utk scalping)")
+htf            = input.timeframe("240", title="Timeframe Lebih Tinggi (MTF)")
+
+switchColor    = input.bool(true, title="Warnai Hull sesuai tren?")
+candleCol      = input.bool(false, title="Warnai candle sesuai tren Hull?")
+visualSwitch   = input.bool(true, title="Tampilkan sebagai Band?")
+thicknesSwitch = input.int(1, title="Ketebalan Garis", minval=1, maxval=4)
+transpSwitch   = input.int(40, title="Transparansi Band", minval=0, maxval=100, step=5)
+
+// ============ FUNGSI HULL ============
+HMA(_src, _length) =>
+    ta.wma(2 * ta.wma(_src, _length / 2) - ta.wma(_src, _length), math.round(math.sqrt(_length)))
+
+EHMA(_src, _length) =>
+    ta.ema(2 * ta.ema(_src, _length / 2) - ta.ema(_src, _length), math.round(math.sqrt(_length)))
+
+THMA(_src, _length) =>
+    ta.wma(ta.wma(_src, _length / 3) * 3 - ta.wma(_src, _length / 2) - ta.wma(_src, _length), _length)
+
+Mode(_modeSwitch, _src, _len) =>
+    _modeSwitch == "Hma" ? HMA(_src, _len) : _modeSwitch == "Ehma" ? EHMA(_src, _len) : _modeSwitch == "Thma" ? THMA(_src, _len / 2) : na
+
+// ============ OUTPUT HULL (dengan opsi MTF) ============
+_hullLocal = Mode(modeSwitch, src, length)
+HULL       = useHtf ? request.security(syminfo.tickerid, htf, _hullLocal, lookahead=barmerge.lookahead_off) : _hullLocal
+MHULL      = HULL
+SHULL      = HULL[2]
+
+// ============ WARNA ============
+hullColor = switchColor ? (HULL > HULL[2] ? color.new(#00ff00, 0) : color.new(#ff0000, 0)) : color.new(#ff9800, 0)
+
+// ============ PLOT BAND ============
+Fi1 = plot(MHULL, title="MHULL", color=color.new(hullColor, 50), linewidth=thicknesSwitch)
+Fi2 = plot(visualSwitch ? SHULL : na, title="SHULL", color=color.new(hullColor, 50), linewidth=thicknesSwitch)
+fill(Fi1, Fi2, title="Band Filler", color=color.new(hullColor, transpSwitch))
+
+barcolor(candleCol ? (switchColor ? hullColor : na) : na)
+
+// ============ ALERT ============
+alertcondition(ta.crossover(MHULL, SHULL), title="Hull trending up.", message="Hull trending up.")
+alertcondition(ta.crossover(SHULL, MHULL), title="Hull trending down.", message="Hull trending down.")
+
+// ============ ENTRY STRATEGY ============
+if HULL > HULL[2] and testPeriod()
+    strategy.entry("buy", strategy.long)
+if HULL < HULL[2] and testPeriod()
+    strategy.entry("sell", strategy.short)
+
+// ============ TABEL PROFIT/KERUGIAN TERBESAR (pengganti fitur terkunci Strategy Tester) ============
+showStatsTable = input.bool(true, title="Tampilkan Tabel Profit/Kerugian Terbesar", group="Statistik Tambahan")
+
+var float largestWin  = 0.0
+var float largestLoss = 0.0
+var int   lastTradeCount = 0
+
+if strategy.closedtrades > lastTradeCount
+    lastTradeIdx = strategy.closedtrades - 1
+    lastProfit = strategy.closedtrades.profit(lastTradeIdx)
+    if lastProfit > largestWin
+        largestWin := lastProfit
+    if lastProfit < largestLoss
+        largestLoss := lastProfit
+    lastTradeCount := strategy.closedtrades
+
+if showStatsTable and barstate.islast
+    var table statsTable = table.new(position.top_right, 2, 3, border_width=1)
+    table.cell(statsTable, 0, 0, "Statistik", text_color=color.white, bgcolor=color.new(color.black, 0))
+    table.cell(statsTable, 1, 0, "Nilai", text_color=color.white, bgcolor=color.new(color.black, 0))
+    table.cell(statsTable, 0, 1, "Profit Terbesar", text_color=color.white, bgcolor=color.new(color.green, 70))
+    table.cell(statsTable, 1, 1, str.tostring(largestWin, "#.##"), text_color=color.white, bgcolor=color.new(color.green, 70))
+    table.cell(statsTable, 0, 2, "Kerugian Terbesar", text_color=color.white, bgcolor=color.new(color.red, 70))
+    table.cell(statsTable, 1, 2, str.tostring(largestLoss, "#.##"), text_color=color.white, bgcolor=color.new(color.red, 70))
